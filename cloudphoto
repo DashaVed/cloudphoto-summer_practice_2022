@@ -60,8 +60,19 @@ def upload(album, path, bucket, url):
 
 
 def download(album, path, bucket, url):
-    s3 = boto3.resource('s3', endpoint_url=url)
-    s3.meta.client.download_file(bucket, 'hello.txt', '/tmp/hello.txt')
+    session = boto3.session.Session()
+    s3 = session.client(
+        service_name='s3',
+        endpoint_url=url
+    )
+    resource = boto3.resource('s3', endpoint_url=url)
+    for file in s3.list_objects(Bucket=bucket, Prefix=album)['Contents']:
+        key = file["Key"]
+        final_path = os.path.join(path, key)
+        if not os.path.exists(os.path.dirname(final_path)):
+            os.makedirs(os.path.dirname(final_path))
+        if not key.endswith('/'):
+            resource.meta.client.download_file(bucket, key, final_path)
 
 
 def main():
@@ -72,3 +83,7 @@ def main():
         upload(arguments.album, arguments.path, bucket_name, endpoint_url)
     elif arguments.command == 'download':
         download(arguments.album, arguments.path, bucket_name, endpoint_url)
+
+
+if __name__ == "__main__":
+    main()
