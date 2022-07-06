@@ -1,0 +1,74 @@
+#!/usr/bin/env python3
+
+import argparse
+import boto3
+import configparser
+import os
+import sys
+
+
+def args():
+    parser = argparse.ArgumentParser()
+    sub_parser = parser.add_subparsers(dest='command', required=True)
+
+    upload_command = sub_parser.add_parser('upload', help='Uploading photos')
+    upload_command.add_argument('-a', '--album', type=str, dest='album', required=True)
+    upload_command.add_argument('-p', '--path', type=str, dest='path', required=True)
+
+    download_command = sub_parser.add_parser('download', help='Downloading photos')
+    download_command.add_argument('-a', '--album', type=str, dest='album', required=True)
+    download_command.add_argument('-p', '--path', type=str, dest='path', required=True)
+
+    sub_parser.add_parser('list-albums', help='Printing list of albums')
+
+    list_photos_command = sub_parser.add_parser('list-photos', help='Printing list of photos in album')
+    list_photos_command.add_argument('-a', '--album', type=str, dest='album', required=True)
+
+    sub_parser.add_parser('generate-site', help="Printing url of cloudphoto")
+
+    return parser
+
+
+def config():
+    try:
+        cfg_file = open(f"{os.environ['HOME']}/.config/cloudphoto/cloudphotorc")
+    except OSError:
+        print("Не удалось прочитать конфигурационный файл", file=sys.stderr)
+        sys.exit(os.EX_CONFIG)
+    cfg = configparser.ConfigParser()
+    cfg.read_file(cfg_file)
+    try:
+        bucket = cfg['default']['bucket']
+        aws_access_key_id = cfg['default']['aws_access_key_id']
+        aws_secret_access_key = cfg['default']['aws_secret_access_key']
+        region = cfg['default']['region']
+        endpoint_url = cfg['default']['endpoint_url']
+    except KeyError as err:
+        print(f"Не найден параметр {err}")
+        sys.exit(os.EX_CONFIG)
+    cfg_file.close()
+    return bucket, endpoint_url #, aws_access_key_id, aws_secret_access_key, region,
+
+
+def upload(album, path, bucket, url):
+    files = [file for file in os.listdir(path) if
+             os.path.isfile(os.path.join(path, file)) and file.endswith(('.jpg', '.jpeg'))]
+    s3 = boto3.resource('s3', endpoint_url=url)
+    for f in files:
+        filename = f"{path}/{f}"
+        s3.meta.client.upload_file(filename, bucket, album + '/' + f)
+
+
+def download(album, path, bucket, url):
+    s3 = boto3.resource('s3', endpoint_url=url)
+    s3.meta.client.download_file(bucket, 'hello.txt', '/tmp/hello.txt')
+
+
+def main():
+    bucket_name, endpoint_url = config()
+    arg_parser = args()
+    arguments = arg_parser.parse_args()
+    if arguments.command == 'upload':
+        upload(arguments.album, arguments.path, bucket_name, endpoint_url)
+    elif arguments.command == 'download':
+        download(arguments.album, arguments.path, bucket_name, endpoint_url)
