@@ -47,56 +47,73 @@ def config():
         print(f"Не найден параметр {err}")
         sys.exit(os.EX_CONFIG)
     cfg_file.close()
-    return bucket, endpoint_url #, aws_access_key_id, aws_secret_access_key, region,
+    return bucket, endpoint_url, aws_access_key_id, aws_secret_access_key, region
 
 
-def upload(album, path, bucket, url):
-    files = [file for file in os.listdir(path) if
-             os.path.isfile(os.path.join(path, file)) and file.endswith(('.jpg', '.jpeg'))]
+def upload(album: str, path: str, bucket: str, url: str) -> None:
+    """Upload files to Object Storage"""
+    try:
+        files = [file for file in os.listdir(path) if
+                 os.path.isfile(os.path.join(path, file)) and file.endswith(('.jpg', '.jpeg'))]
+    except FileNotFoundError:
+        print("Такого пути нет")
+        return
     s3 = boto3.resource('s3', endpoint_url=url)
     for f in files:
         filename = f"{path}/{f}"
         s3.meta.client.upload_file(filename, bucket, album + '/' + f)
 
 
-def download(album, path, bucket, url):
+def download(album: str, path: str, bucket: str, url: str) -> None:
+    """Download files from Object Storage"""
     session = boto3.session.Session()
     s3 = session.client(
         service_name='s3',
         endpoint_url=url
     )
     resource = boto3.resource('s3', endpoint_url=url)
-    for file in s3.list_objects(Bucket=bucket, Prefix=album)['Contents']:
-        key = file["Key"]
-        final_path = os.path.join(path, key)
-        if not os.path.exists(os.path.dirname(final_path)):
-            os.makedirs(os.path.dirname(final_path))
-        if not key.endswith('/'):
-            resource.meta.client.download_file(bucket, key, final_path)
+    try:
+        for file in s3.list_objects(Bucket=bucket, Prefix=album)['Contents']:
+            key = file["Key"]
+            final_path = os.path.join(path, key)
+            if not os.path.exists(os.path.dirname(final_path)):
+                os.makedirs(os.path.dirname(final_path))
+            if not key.endswith('/'):
+                resource.meta.client.download_file(bucket, key, final_path)
+    except KeyError:
+        print('Такого альбома не существует')
 
 
-def list_albums(bucket, url):
+def list_albums(bucket: str, url: str) -> None:
+    """Display a list of albums in Object Storage"""
     s3 = boto3.client('s3', endpoint_url=url)
     albums = []
     for key in s3.list_objects_v2(Bucket=bucket)['Contents']:
-        album = key["Key"][:key["Key"].find('/')]
+        album = key["Key"].split("/")[0]
         if album not in albums:
             albums.append(album)
     print(albums)
 
 
-def list_photos(album, bucket, url):
+def list_photos(album: str, bucket: str, url: str) -> None:
+    """Display a list of files(photos) in Object Storage"""
     s3 = boto3.client('s3', endpoint_url=url)
     photos = []
-    for key in s3.list_objects_v2(Bucket=bucket, Prefix=album)['Contents']:
-        photo = key["Key"][key["Key"].find('/')+1:]
-        if photo not in photos:
-            photos.append(photo)
-    print(photos)
+    try:
+        for key in s3.list_objects_v2(Bucket=bucket, Prefix=album + "/")['Contents']:
+            photo = key["Key"].split("/")[1]
+            if photo not in photos:
+                photos.append(photo)
+        print(photos)
+    except KeyError:
+        print('Такого альбома не существует')
+
+
+def generate_site(): ...
 
 
 def main():
-    bucket_name, endpoint_url = config()
+    bucket_name, endpoint_url, aws_key_id, aws_secret_key, region = config()
     arg_parser = args()
     arguments = arg_parser.parse_args()
     if arguments.command == 'upload':
@@ -105,7 +122,8 @@ def main():
         download(arguments.album, arguments.path, bucket_name, endpoint_url)
     elif arguments.command == 'list-albums':
         list_albums(bucket_name, endpoint_url)
-    list_photos(arguments.album, bucket_name, endpoint_url)
+    elif arguments.command == 'list-photos':
+        list_photos(arguments.album, bucket_name, endpoint_url)
 
 
 if __name__ == "__main__":
