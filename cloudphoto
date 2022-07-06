@@ -75,6 +75,26 @@ def download(album, path, bucket, url):
             resource.meta.client.download_file(bucket, key, final_path)
 
 
+def list_albums(bucket, url):
+    s3 = boto3.client('s3', endpoint_url=url)
+    albums = []
+    for key in s3.list_objects_v2(Bucket=bucket)['Contents']:
+        album = key["Key"][:key["Key"].find('/')]
+        if album not in albums:
+            albums.append(album)
+    print(albums)
+
+
+def list_photos(album, bucket, url):
+    s3 = boto3.client('s3', endpoint_url=url)
+    photos = []
+    for key in s3.list_objects_v2(Bucket=bucket, Prefix=album)['Contents']:
+        photo = key["Key"][key["Key"].find('/')+1:]
+        if photo not in photos:
+            photos.append(photo)
+    print(photos)
+
+
 def main():
     bucket_name, endpoint_url = config()
     arg_parser = args()
@@ -83,6 +103,9 @@ def main():
         upload(arguments.album, arguments.path, bucket_name, endpoint_url)
     elif arguments.command == 'download':
         download(arguments.album, arguments.path, bucket_name, endpoint_url)
+    elif arguments.command == 'list-albums':
+        list_albums(bucket_name, endpoint_url)
+    list_photos(arguments.album, bucket_name, endpoint_url)
 
 
 if __name__ == "__main__":
