@@ -104,9 +104,10 @@ def list_albums(bucket: str, url: str) -> List[str]:
     s3 = boto3.client('s3', endpoint_url=url)
     albums = []
     for key in s3.list_objects_v2(Bucket=bucket)['Contents']:
-        album = key["Key"].split("/")[0]
-        if album not in albums:
-            albums.append(album)
+        if key["Key"].endswith(('.jpg', '.jpeg')):
+            album = key["Key"].split("/")[0]
+            if album not in albums:
+                albums.append(album)
     return albums
 
 
