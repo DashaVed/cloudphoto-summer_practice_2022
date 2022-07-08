@@ -95,6 +95,8 @@ def download(album: str, path: str, bucket: str, url: str,  prefix=None) -> None
                 resource.meta.client.download_file(bucket, key, final_path)
     except KeyError:
         print(f'Альбома {album} не существует')
+    except FileNotFoundError:
+        print(f'Не удается загрузить файлы, так как нет пути {path}')
 
 
 def list_albums(bucket: str, url: str) -> List[str]:
@@ -138,7 +140,7 @@ def generate_album_site(album_name: str, bucket: str, url: str) -> None:
     path = os.path.join(os.path.abspath('photo_site'), album_name + '.html')
     with open(path, 'w') as file:
         file.write(t)
-    upload_html(bucket, url, path, album_name)
+    upload_html(bucket, url, path, f'{album_name}.html')
 
 
 def create_html(bucket: str, url: str) -> None:
@@ -155,7 +157,7 @@ def create_html(bucket: str, url: str) -> None:
         with div(id='header').add(ol()):
             for album in albums:
                 generate_album_site(album, bucket, url)
-                li(a(album, href='%s.html' % album))
+                li(a(album, href=f'https://{bucket}.storage.yandexcloud.net/{album}.html'))
     index_path = os.path.join(os.path.abspath('photo_site'), 'index.html')
     with open(index_path, 'w') as file:
         file.write(str(doc))
@@ -169,6 +171,7 @@ def upload_html(bucket: str, url: str, path: str, name: str) -> None:
 
 
 def generate_site(bucket: str, url: str) -> str:
+    """Main method for site's generator that return link to site"""
     create_html(bucket, url)
     session = boto3.session.Session()
     s3 = session.client(
@@ -194,6 +197,7 @@ def setting_boto(aws_key_id: str, aws_secret_key: str, region: str) -> None:
 
 
 def main():
+    """Main method"""
     bucket_name, endpoint_url, aws_key_id, aws_secret_key, region = config()
     setting_boto(aws_key_id, aws_secret_key, region)
     arg_parser = args()
