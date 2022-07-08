@@ -3,8 +3,12 @@
 import argparse
 import boto3
 import configparser
+import dominate
+import jinja2
 import os
 import sys
+from dominate.tags import *
+from typing import List
 
 
 def args():
@@ -56,7 +60,7 @@ def upload(album: str, path: str, bucket: str, url: str) -> None:
         files = [file for file in os.listdir(path) if
                  os.path.isfile(os.path.join(path, file)) and file.endswith(('.jpg', '.jpeg'))]
     except FileNotFoundError:
-        print("Такого пути нет")
+        print(f"Путь {path} не существует")
         return
     s3 = boto3.resource('s3', endpoint_url=url)
     for f in files:
@@ -64,8 +68,15 @@ def upload(album: str, path: str, bucket: str, url: str) -> None:
         s3.meta.client.upload_file(filename, bucket, album + '/' + f)
 
 
-def download(album: str, path: str, bucket: str, url: str) -> None:
-    """Download files from Object Storage"""
+def download(album: str, path: str, bucket: str, url: str,  prefix=None) -> None:
+    """Download files from Object Storage
+    :param
+    album - album name
+    path - path to file for downloading
+    bucket - bucket name
+    url - endpoint url
+    prefix - word particle in front for file name
+    """
     session = boto3.session.Session()
     s3 = session.client(
         service_name='s3',
@@ -75,16 +86,18 @@ def download(album: str, path: str, bucket: str, url: str) -> None:
     try:
         for file in s3.list_objects(Bucket=bucket, Prefix=album)['Contents']:
             key = file["Key"]
-            final_path = os.path.join(path, key)
-            if not os.path.exists(os.path.dirname(final_path)):
-                os.makedirs(os.path.dirname(final_path))
+            if prefix:
+                file_name = prefix + key.split('/')[-1]
+            else:
+                file_name = key.split('/')[-1]
+            final_path = os.path.join(path, file_name)
             if not key.endswith('/'):
                 resource.meta.client.download_file(bucket, key, final_path)
     except KeyError:
-        print('Такого альбома не существует')
+        print(f'Альбома {album} не существует')
 
 
-def list_albums(bucket: str, url: str) -> None:
+def list_albums(bucket: str, url: str) -> List[str]:
     """Display a list of albums in Object Storage"""
     s3 = boto3.client('s3', endpoint_url=url)
     albums = []
@@ -92,28 +105,97 @@ def list_albums(bucket: str, url: str) -> None:
         album = key["Key"].split("/")[0]
         if album not in albums:
             albums.append(album)
-    print(albums)
+    return albums
 
 
-def list_photos(album: str, bucket: str, url: str) -> None:
+def list_photos(album: str, bucket: str, url: str) -> List[str]:
     """Display a list of files(photos) in Object Storage"""
     s3 = boto3.client('s3', endpoint_url=url)
     photos = []
     try:
         for key in s3.list_objects_v2(Bucket=bucket, Prefix=album + "/")['Contents']:
-            photo = key["Key"].split("/")[1]
+            photo = key["Key"].split("/")[-1]
             if photo not in photos:
                 photos.append(photo)
-        print(photos)
+        return photos
     except KeyError:
-        print('Такого альбома не существует')
+        print(f'Альбома {album} не существует')
 
 
-def generate_site(): ...
+def generate_album_site(album_name: str, bucket: str, url: str) -> None:
+    """Generate site of album, create and upload html file
+    :param
+    album_name - name of album
+    bucket - name of bucket
+    url - endpoint_url
+    """
+    photos = list_photos(album_name, bucket, url)
+    download(album_name, os.path.abspath('photo_site'), bucket, url, prefix=f'{album_name}-')
+    with open(os.path.join(os.path.abspath('template'), 'template.html'), 'r') as file:
+        text = file.read()
+    template = jinja2.Template(text)
+    t = template.render(title=album_name, photos=photos)
+    path = os.path.join(os.path.abspath('photo_site'), album_name + '.html')
+    with open(path, 'w') as file:
+        file.write(t)
+    upload_html(bucket, url, path, album_name)
+
+
+def create_html(bucket: str, url: str) -> None:
+    """Generate main site - index.html"""
+    albums = list_albums(bucket, url)
+    doc = dominate.document(title='cloudphoto')
+    if not os.path.exists('photo_site'):
+        os.mkdir('photo_site')
+
+    with doc.head:
+        link(rel='stylesheet', href='style.css')
+    with doc:
+        h1('Cloudphoto')
+        with div(id='header').add(ol()):
+            for album in albums:
+                generate_album_site(album, bucket, url)
+                li(a(album, href='%s.html' % album))
+    index_path = os.path.join(os.path.abspath('photo_site'), 'index.html')
+    with open(index_path, 'w') as file:
+        file.write(str(doc))
+    upload_html(bucket, url, index_path, 'index.html')
+
+
+def upload_html(bucket: str, url: str, path: str, name: str) -> None:
+    """Upload html file"""
+    resource = boto3.resource('s3', endpoint_url=url)
+    resource.meta.client.upload_file(path, bucket, name)
+
+
+def generate_site(bucket: str, url: str) -> str:
+    create_html(bucket, url)
+    session = boto3.session.Session()
+    s3 = session.client(
+        service_name='s3',
+        endpoint_url=url
+    )
+    s3.put_bucket_website(Bucket=bucket, WebsiteConfiguration={'IndexDocument': {'Suffix': 'index.html'}})
+    return f'https://{bucket}.website.yandexcloud.net'
+
+
+def setting_boto(aws_key_id: str, aws_secret_key: str, region: str) -> None:
+    """Настройка конфигурационных файлов для boto3"""
+    aws_path = f"{os.environ['HOME']}/.aws"
+    if not os.path.exists(aws_path):
+        os.mkdir(aws_path)
+    with open(aws_path + '/credentials', 'w') as file:
+        file.write("[default]\n")
+        file.write(f"\t\taws_access_key_id = {aws_key_id}\n")
+        file.write(f"\t\taws_secret_access_key = {aws_secret_key}")
+    with open(aws_path + '/config', 'w') as file:
+        file.write("[default]\n")
+        file.write(f"\t\tregion={region}")
 
 
 def main():
     bucket_name, endpoint_url, aws_key_id, aws_secret_key, region = config()
+    setting_boto(aws_key_id, aws_secret_key, region)
     arg_parser = args()
     arguments = arg_parser.parse_args()
     if arguments.command == 'upload':
@@ -121,9 +203,11 @@ def main():
     elif arguments.command == 'download':
         download(arguments.album, arguments.path, bucket_name, endpoint_url)
     elif arguments.command == 'list-albums':
-        list_albums(bucket_name, endpoint_url)
+        print(list_albums(bucket_name, endpoint_url))
     elif arguments.command == 'list-photos':
-        list_photos(arguments.album, bucket_name, endpoint_url)
+        print(list_photos(arguments.album, bucket_name, endpoint_url))
+    elif arguments.command == 'generate-site':
+        print(generate_site(bucket_name, endpoint_url))
 
 
 if __name__ == "__main__":
